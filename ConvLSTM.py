@@ -1,8 +1,6 @@
 import torch
 import torch.nn as nn
 
-
-
 class ConvLSTMCell(nn.Module):
     """
     The basic ConvLSTMCell unit without implementing dropout of hidden and input conv
@@ -12,7 +10,9 @@ class ConvLSTMCell(nn.Module):
                  in_channels,
                  hidden_channels,
                  kernel_size,
-                 bias):
+                 bias,
+                 cnn_dropout=0,
+                 rnn_dropout=0):
         """
             Initialize ConvLSTM cell.
 
@@ -40,9 +40,13 @@ class ConvLSTMCell(nn.Module):
                               kernel_size=self.kernel_size,
                               padding=self.padding,
                               bias=self.bias)
+        self.cnn_dropout = nn.Dropout(cnn_dropout)
+        self.rnn_dropout = nn.Dropout(rnn_dropout)
 
     def forward(self, input_tensor, state):
         hidden, cell = state
+        input_tensor = self.cnn_dropout(input_tensor)
+        hidden = self.rnn_dropout(hidden)
         combined = torch.cat([input_tensor, hidden], dim=1)
 
         combined_conv = self.conv(combined)
@@ -71,6 +75,8 @@ class ConvLSTM(nn.Module):
                  num_layers=1,
                  batch_first=False,
                  bias=True,
+                 cnn_dropout=0,
+                 rnn_dropout=0,
                  bidirectional=False,
                  return_all_layers=False):
 
@@ -89,6 +95,8 @@ class ConvLSTM(nn.Module):
         self.num_layers = num_layers
         self.batch_first = batch_first
         self.bias = bias
+        self.cnn_dropout = cnn_dropout
+        self.rnn_dropout = rnn_dropout
         self.bidirectional = bidirectional
         self.return_all_layers = return_all_layers
 
@@ -100,7 +108,9 @@ class ConvLSTM(nn.Module):
                 ConvLSTMCell(in_channels=cur_in_channels,
                              hidden_channels=self.hidden_channels[i],
                              kernel_size=self.kernel_size[i],
-                             bias=self.bias)
+                             bias=self.bias,
+                             cnn_dropout=self.cnn_dropout,
+                             rnn_dropout=self.rnn_dropout)
             )
         self.cells_forward = nn.ModuleList(cells_forward)
 
@@ -114,7 +124,9 @@ class ConvLSTM(nn.Module):
                         in_channels=cur_in_channels,
                         hidden_channels=self.hidden_channels[i],
                         kernel_size=self.kernel_size[i],
-                        bias=self.bias
+                        bias=self.bias,
+                        cnn_dropout=self.cnn_dropout,
+                        rnn_dropout=self.rnn_dropout
                     )
                 )
             self.cells_backward = nn.ModuleList(cells_backward)
@@ -209,7 +221,12 @@ class ConvLSTM(nn.Module):
 
 
 if __name__ == "__main__":
-    test = ConvLSTM(1, 32, (3, 3), 2, True, bidirectional=True)
-    input_tensor = torch.zeros(10, 2, 1, 64, 64)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    test = ConvLSTM(1, 32, (3, 3), 2, True, bidirectional=True).to(device)
+    input_tensor = torch.rand(10, 2, 1, 64, 64).to(device)
     output,_,_ = test(input_tensor)
-    print(output.shape)
+    target = torch.rand((10, 2, 64, 64, 64)).to(device)
+    loss_fn = torch.nn.MSELoss().to(device)
+    loss = loss_fn(target, output)
+    loss.backward()
+    print(loss)
